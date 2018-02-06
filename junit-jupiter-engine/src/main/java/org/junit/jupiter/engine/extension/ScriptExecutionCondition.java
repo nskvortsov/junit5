@@ -47,6 +47,8 @@ class ScriptExecutionCondition implements ExecutionCondition {
 
 	private static final Namespace NAMESPACE = Namespace.create(ScriptExecutionCondition.class);
 
+	private static final String NAME = "org.junit.jupiter.engine.extension.ScriptExecutionWorker";
+
 	@Override
 	public ConditionEvaluationResult evaluateExecutionCondition(ExtensionContext context) {
 		// Context without an annotated element?
@@ -66,7 +68,8 @@ class ScriptExecutionCondition implements ExecutionCondition {
 			return ENABLED_NO_ANNOTATION;
 		}
 
-		return getScriptExecutionWorker(context).work(context, scripts);
+		Worker worker = getScriptExecutionWorker(context);
+		return worker.work(context, scripts);
 	}
 
 	private Optional<Script> createDisabledIfScript(AnnotatedElement annotatedElement) {
@@ -97,30 +100,49 @@ class ScriptExecutionCondition implements ExecutionCondition {
 
 	private Worker getScriptExecutionWorker(ExtensionContext context) {
 		ExtensionContext.Store rootStore = context.getRoot().getStore(NAMESPACE);
-		return rootStore.getOrComputeIfAbsent(Worker.class, this::createWorker, Worker.class);
+		return rootStore.getOrComputeIfAbsent(NAME, this::createWorker, Worker.class);
 	}
 
 	// Create worker via reflection to hide the `javax.script` dependency.
-	private Worker createWorker(Class<Worker> key) {
-		String name = "org.junit.jupiter.engine.extension.ScriptExecutionWorker";
+	private Worker createWorker(String name) {
 		try {
+			logger.debug(() -> "Creating instance of " + name);
 			return (Worker) Class.forName(name).getDeclaredConstructor().newInstance();
 		}
 		catch (ReflectiveOperationException e) {
-			logger.error(e, () -> "Creating Worker failed");
-			return new FailingWorker();
+			logger.error(e, () -> String.format("Creating `%s` failed", name));
+			return new ThrowingWorker(e);
 		}
 	}
 
+	/**
+	 * Evaluates scripts and returns a conditional evaluation result.
+	 */
 	interface Worker {
 		ConditionEvaluationResult work(ExtensionContext context, List<Script> scripts);
 	}
 
-	class FailingWorker implements Worker {
+	/**
+	 * Worker implementation that always throws an {@link ScriptEvaluationException}.
+	 */
+	class ThrowingWorker implements Worker {
+
+		final ScriptEvaluationException exception;
+
+		ThrowingWorker(Throwable cause) {
+			String message = "ScriptExecutionCondition extension is in an illegal state, " //
+					+ "evaluation of script is disabled. " //
+					+ "If the originating cause is a `NoClassDefFoundError: javax/script/...` and " //
+					+ "the underlying runtime environment is executed with an activated module system " //
+					+ "(aka Jigsaw or JPMS) you might add the `java.scripting` module to the " //
+					+ "root modules.";
+
+			this.exception = new ScriptEvaluationException(message, cause);
+		}
 
 		@Override
 		public ConditionEvaluationResult work(ExtensionContext context, List<Script> scripts) {
-			throw new ScriptEvaluationException("TODO Here be a better message with potential solution!");
+			throw exception;
 		}
 	}
 }
