@@ -35,15 +35,15 @@ import org.junit.jupiter.engine.script.Script;
 import org.junit.jupiter.engine.script.ScriptExecutionManager;
 
 /**
- * Unit tests for {@link ScriptExecutionCondition}.
+ * Unit tests for {@link ScriptExecutionWorker}.
  *
  * @since 5.1
  */
 class ScriptExecutionWorkerTests extends AbstractJupiterTestEngineTests {
 
 	private final Bindings bindings = createDefaultContextBindings();
-	private final ScriptExecutionWorker worker = new ScriptExecutionWorker();
 	private final ScriptExecutionManager manager = new ScriptExecutionManager();
+	private final ScriptExecutionWorker worker = new ScriptExecutionWorker();
 
 	@Test
 	void computeConditionEvaluationResultWithDefaultReasonMessage() {

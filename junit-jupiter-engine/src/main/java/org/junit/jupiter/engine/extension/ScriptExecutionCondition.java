@@ -26,6 +26,8 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ExtensionContext.Namespace;
 import org.junit.jupiter.api.extension.ScriptEvaluationException;
 import org.junit.jupiter.engine.script.Script;
+import org.junit.platform.commons.logging.Logger;
+import org.junit.platform.commons.logging.LoggerFactory;
 
 /**
  * {@link ExecutionCondition} that supports the {@link DisabledIf} and {@link EnabledIf} annotation.
@@ -36,6 +38,8 @@ import org.junit.jupiter.engine.script.Script;
  * @see #evaluateExecutionCondition(ExtensionContext)
  */
 class ScriptExecutionCondition implements ExecutionCondition {
+
+	private static final Logger logger = LoggerFactory.getLogger(ScriptExecutionCondition.class);
 
 	private static final ConditionEvaluationResult ENABLED_NO_ELEMENT = enabled("AnnotatedElement not present");
 
@@ -92,22 +96,31 @@ class ScriptExecutionCondition implements ExecutionCondition {
 	}
 
 	private Worker getScriptExecutionWorker(ExtensionContext context) {
-		return context.getRoot().getStore(NAMESPACE).getOrComputeIfAbsent(Worker.class, this::createWorker,
-			Worker.class);
+		ExtensionContext.Store rootStore = context.getRoot().getStore(NAMESPACE);
+		return rootStore.getOrComputeIfAbsent(Worker.class, this::createWorker, Worker.class);
 	}
 
+	// Create worker via reflection to hide the `javax.script` dependency.
 	private Worker createWorker(Class<Worker> key) {
-		// Create worker via reflection to hide the `java.scripting` dependencies.
+		String name = "org.junit.jupiter.engine.extension.ScriptExecutionWorker";
 		try {
-			return (Worker) Class.forName(
-				"org.junit.jupiter.engine.extension.ScriptExecutionWorker").getDeclaredConstructor().newInstance();
+			return (Worker) Class.forName(name).getDeclaredConstructor().newInstance();
 		}
 		catch (ReflectiveOperationException e) {
-			throw new ScriptEvaluationException("Failed to create ScriptExecutionWorker instance", e);
+			logger.error(e, () -> "Creating Worker failed");
+			return new FailingWorker();
 		}
 	}
 
 	interface Worker {
 		ConditionEvaluationResult work(ExtensionContext context, List<Script> scripts);
+	}
+
+	class FailingWorker implements Worker {
+
+		@Override
+		public ConditionEvaluationResult work(ExtensionContext context, List<Script> scripts) {
+			throw new ScriptEvaluationException("TODO Here be a better message with potential solution!");
+		}
 	}
 }
