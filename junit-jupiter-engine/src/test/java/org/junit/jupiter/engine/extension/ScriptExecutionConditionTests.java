@@ -11,8 +11,10 @@
 package org.junit.jupiter.engine.extension;
 
 import static org.assertj.core.api.Assertions.allOf;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.platform.engine.discovery.DiscoverySelectors.selectClass;
 import static org.junit.platform.engine.test.event.ExecutionEventConditions.assertRecordedExecutionEventsContainsExactly;
@@ -27,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.condition.DisabledIf;
 import org.junit.jupiter.api.condition.EnabledIf;
+import org.junit.jupiter.api.extension.ScriptEvaluationException;
 import org.junit.jupiter.engine.AbstractJupiterTestEngineTests;
 import org.junit.platform.commons.JUnitException;
 import org.junit.platform.engine.test.event.ExecutionEventRecorder;
@@ -71,6 +74,15 @@ class ScriptExecutionConditionTests extends AbstractJupiterTestEngineTests {
 		DisabledIf d = info.getTestMethod().orElseThrow(Error::new).getDeclaredAnnotation(DisabledIf.class);
 		assertEquals("Nashorn", d.engine());
 		assertEquals("Script `{source}` evaluated to: {result}", d.reason());
+	}
+
+	@Test
+	void throwingWorkerExceptionMessage() {
+		ReflectiveOperationException cause = new ReflectiveOperationException("Mock for ReflectiveOperationException");
+		Exception e = assertThrows(ScriptEvaluationException.class,
+			() -> new ScriptExecutionCondition.ThrowingWorker(cause).work(null, null));
+		assertThat(e.getMessage()).contains("ScriptExecutionCondition", "illegal state", "NoClassDefFoundError",
+			"--add-modules");
 	}
 
 	static class SimpleTestCases {

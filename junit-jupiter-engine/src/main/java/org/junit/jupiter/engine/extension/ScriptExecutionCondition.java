@@ -125,17 +125,17 @@ class ScriptExecutionCondition implements ExecutionCondition {
 	/**
 	 * Worker implementation that always throws an {@link ScriptEvaluationException}.
 	 */
-	class ThrowingWorker implements Worker {
+	static class ThrowingWorker implements Worker {
 
 		final ScriptEvaluationException exception;
 
 		ThrowingWorker(Throwable cause) {
 			String message = "ScriptExecutionCondition extension is in an illegal state, " //
-					+ "evaluation of script is disabled. " //
+					+ "script evaluation is disabled. " //
 					+ "If the originating cause is a `NoClassDefFoundError: javax/script/...` and " //
 					+ "the underlying runtime environment is executed with an activated module system " //
-					+ "(aka Jigsaw or JPMS) you might add the `java.scripting` module to the " //
-					+ "root modules.";
+					+ "(aka Jigsaw or JPMS) you need to add the `java.scripting` module to the " //
+					+ "root modules via `--add-modules ...,java.scripting`";
 
 			this.exception = new ScriptEvaluationException(message, cause);
 		}
