@@ -11,7 +11,6 @@
 package org.junit.jupiter.engine.extension;
 
 import static org.assertj.core.api.Assertions.allOf;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -38,7 +37,6 @@ import org.junit.jupiter.api.extension.ConditionEvaluationResult;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ScriptEvaluationException;
 import org.junit.jupiter.engine.AbstractJupiterTestEngineTests;
-import org.junit.jupiter.engine.TrackLogRecords;
 import org.junit.platform.commons.JUnitException;
 import org.junit.platform.engine.test.event.ExecutionEventRecorder;
 import org.junit.platform.launcher.LauncherDiscoveryRequest;
@@ -87,11 +85,11 @@ class ScriptExecutionConditionTests extends AbstractJupiterTestEngineTests {
 
 	@Test
 	void throwingEvaluatorExceptionMessage() {
+		String message = "Mock for message";
 		ReflectiveOperationException cause = new ReflectiveOperationException("Mock for ReflectiveOperationException");
-		ScriptExecutionCondition.Evaluator evaluator = new ScriptExecutionCondition.ThrowingEvaluator(cause);
+		ScriptExecutionCondition.Evaluator evaluator = new ScriptExecutionCondition.ThrowingEvaluator(message, cause);
 		Exception e = assertThrows(ScriptEvaluationException.class, () -> evaluator.evaluate(null, null));
-		assertThat(e.getMessage()).contains("ScriptExecutionCondition", "illegal state", "NoClassDefFoundError",
-			"--add-modules", "java.scripting");
+		assertEquals(message, e.getMessage());
 	}
 
 	@Test
@@ -117,16 +115,27 @@ class ScriptExecutionConditionTests extends AbstractJupiterTestEngineTests {
 	}
 
 	@Test
-	@TrackLogRecords
-	void throwingEvaluatorIsCreatedWhenScriptEngineIsNotAvailable() throws ReflectiveOperationException {
-		ScriptExecutionCondition condition = new ScriptExecutionCondition("illegal class name");
+	void throwingEvaluatorIsCreatedWhenScriptEngineIsNotAvailable() {
+		String nameOfScriptEngine = "javax.script.DoesNotExist";
+		String name = "org.junit.jupiter.engine.extension.ScriptExecutionEvaluator";
+		ScriptExecutionCondition.Evaluator evaluator = ScriptExecutionCondition.Evaluator.forName(nameOfScriptEngine,
+			name);
+		Exception e = assertThrows(Exception.class, () -> evaluator.evaluate(null, null));
+		String message = e.getMessage();
+		System.out.println(message);
+		assertTrue(message.startsWith("Class `" + nameOfScriptEngine + "` is not loadable"));
+		assertTrue(message.endsWith("`--add-modules ...,java.scripting`"));
+	}
+
+	@Test
+	void throwingEvaluatorIsCreatedWhenDefaultEvaluatorClassNameIsIllegal() throws ReflectiveOperationException {
+		String name = "illegal class name";
+		ScriptExecutionCondition condition = new ScriptExecutionCondition(name);
 		ExtensionContext context = Mockito.mock(ExtensionContext.class);
 		AnnotatedElement element = SimpleTestCases.class.getDeclaredMethod("testIsEnabled");
 		Mockito.when(context.getElement()).thenReturn(Optional.of(element));
-		Exception e = assertThrows(ScriptEvaluationException.class,
-			() -> condition.evaluateExecutionCondition(context));
-		assertThat(e.getMessage()).contains("ScriptExecutionCondition", "illegal state", "NoClassDefFoundError",
-			"--add-modules", "java.scripting");
+		Exception e = assertThrows(Exception.class, () -> condition.evaluateExecutionCondition(context));
+		assertTrue(e.getMessage().startsWith("Creating instance of class `" + name + "` failed"));
 	}
 
 	static class SimpleTestCases {

@@ -64,39 +64,45 @@ class ScriptExecutionCondition implements ExecutionCondition {
 		AnnotatedElement annotatedElement = element.get();
 
 		// Always try to create script instances.
-		List<Script> scripts = new ArrayList<>();
-		createDisabledIfScript(annotatedElement).ifPresent(scripts::add);
-		createEnabledIfScript(annotatedElement).ifPresent(scripts::add);
+		Script disabledScript = createDisabledIfScriptOrNull(annotatedElement);
+		Script enabledScript = createEnabledIfScriptOrNull(annotatedElement);
 
 		// If no scripts are created, no annotation of interest is attached to the underlying element.
-		if (scripts.isEmpty()) {
+		if (disabledScript == null && enabledScript == null) {
 			return ENABLED_NO_ANNOTATION;
+		}
+
+		// Prepare list with single or two script elements.
+		List<Script> scripts = new ArrayList<>();
+		if (disabledScript != null) {
+			scripts.add(disabledScript);
+		}
+		if (enabledScript != null) {
+			scripts.add(enabledScript);
 		}
 
 		// Let the evaluator do its work.
 		return evaluator.evaluate(context, scripts);
 	}
 
-	private Optional<Script> createDisabledIfScript(AnnotatedElement annotatedElement) {
+	private Script createDisabledIfScriptOrNull(AnnotatedElement annotatedElement) {
 		Optional<DisabledIf> disabled = findAnnotation(annotatedElement, DisabledIf.class);
 		if (!disabled.isPresent()) {
-			return Optional.empty();
+			return null;
 		}
 		DisabledIf annotation = disabled.get();
 		String source = createSource(annotation.value());
-		Script script = new Script(annotation, annotation.engine(), source, annotation.reason());
-		return Optional.of(script);
+		return new Script(annotation, annotation.engine(), source, annotation.reason());
 	}
 
-	private Optional<Script> createEnabledIfScript(AnnotatedElement annotatedElement) {
+	private Script createEnabledIfScriptOrNull(AnnotatedElement annotatedElement) {
 		Optional<EnabledIf> enabled = findAnnotation(annotatedElement, EnabledIf.class);
 		if (!enabled.isPresent()) {
-			return Optional.empty();
+			return null;
 		}
 		EnabledIf annotation = enabled.get();
 		String source = createSource(annotation.value());
-		Script script = new Script(annotation, annotation.engine(), source, annotation.reason());
-		return Optional.of(script);
+		return new Script(annotation, annotation.engine(), source, annotation.reason());
 	}
 
 	private String createSource(String[] lines) {
@@ -112,34 +118,45 @@ class ScriptExecutionCondition implements ExecutionCondition {
 
 		/**
 		 * Create evaluator via reflection to hide the `javax.script` dependency.
+		 *
+		 * <p>This method may return a {@link ThrowingEvaluator} instance on JREs that
+		 * don't provide the "javax.script" package at all. It also returns such an
+		 * instance on JREs that are launched with an active module system using
+		 * insufficient module graphs, i.e. the application does not read
+		 * {@code java.scripting} module.
+		 *
+		 * @see Class#forName(String)
 		 */
 		static Evaluator forName(String name) {
-			Optional<Throwable> optionalThrowable = assumeScriptEngineIsLoadableByClassForName();
-			if (optionalThrowable.isPresent()) {
-				return new ThrowingEvaluator(optionalThrowable.get());
+			// Assert that "javax.script.ScriptEngine" is loadable via basic reflection.
+			return forName("javax.script.ScriptEngine", name);
+		}
+
+		static Evaluator forName(String nameOfScriptEngine, String name) {
+			// Assert that precondition name is loadable via basic reflection.
+			try {
+				Class.forName(nameOfScriptEngine);
 			}
+			catch (Throwable cause) {
+				String message = "Class `" + nameOfScriptEngine + "` is not loadable, " //
+						+ "script-based test execution is disabled. " //
+						+ "If the originating cause is a `NoClassDefFoundError: javax/script/...` and " //
+						+ "the underlying runtime environment is executed with an activated module system " //
+						+ "(aka Jigsaw or JPMS) you need to add the `java.scripting` module to the " //
+						+ "root modules via `--add-modules ...,java.scripting`";
+				return new ThrowingEvaluator(message, cause);
+			}
+			// Now create the evaluator instance specified by its class name.
 			try {
 				return (Evaluator) Class.forName(name).getDeclaredConstructor().newInstance();
 			}
 			catch (ReflectiveOperationException cause) {
-				return new ThrowingEvaluator(cause);
+				String message = "Creating instance of class `" + name + "` failed," //
+						+ "script-based test execution is disabled.";
+				return new ThrowingEvaluator(message, cause);
 			}
 		}
 
-		/**
-		 * This method may fail on JREs that don't provide the "javax.script" package at all
-		 * or it fails on JREs launched with an active module system using insufficient module
-		 * graphs, i.e. the application does not read "java.scripting" module.
-		 */
-		static Optional<Throwable> assumeScriptEngineIsLoadableByClassForName() {
-			try {
-				Class.forName("javax.script.ScriptEngine");
-				return Optional.empty();
-			}
-			catch (Throwable cause) {
-				return Optional.of(cause);
-			}
-		}
 	}
 
 	/**
@@ -149,14 +166,7 @@ class ScriptExecutionCondition implements ExecutionCondition {
 
 		final ScriptEvaluationException exception;
 
-		ThrowingEvaluator(Throwable cause) {
-			String message = "ScriptExecutionCondition extension is in an illegal state, " //
-					+ "script evaluation is disabled. " //
-					+ "If the originating cause is a `NoClassDefFoundError: javax/script/...` and " //
-					+ "the underlying runtime environment is executed with an activated module system " //
-					+ "(aka Jigsaw or JPMS) you need to add the `java.scripting` module to the " //
-					+ "root modules via `--add-modules ...,java.scripting`";
-
+		ThrowingEvaluator(String message, Throwable cause) {
 			this.exception = new ScriptEvaluationException(message, cause);
 		}
 
