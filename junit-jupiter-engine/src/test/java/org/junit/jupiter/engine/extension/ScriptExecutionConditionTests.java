@@ -14,7 +14,10 @@ import static org.assertj.core.api.Assertions.allOf;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.platform.engine.discovery.DiscoverySelectors.selectClass;
 import static org.junit.platform.engine.test.event.ExecutionEventConditions.assertRecordedExecutionEventsContainsExactly;
@@ -25,15 +28,22 @@ import static org.junit.platform.engine.test.event.TestExecutionResultConditions
 import static org.junit.platform.engine.test.event.TestExecutionResultConditions.message;
 import static org.junit.platform.launcher.core.LauncherDiscoveryRequestBuilder.request;
 
+import java.lang.reflect.AnnotatedElement;
+import java.util.Optional;
+
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.condition.DisabledIf;
 import org.junit.jupiter.api.condition.EnabledIf;
+import org.junit.jupiter.api.extension.ConditionEvaluationResult;
+import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ScriptEvaluationException;
 import org.junit.jupiter.engine.AbstractJupiterTestEngineTests;
 import org.junit.platform.commons.JUnitException;
 import org.junit.platform.engine.test.event.ExecutionEventRecorder;
 import org.junit.platform.launcher.LauncherDiscoveryRequest;
+import org.mockito.Mockito;
 
 /**
  * Unit tests for {@link ScriptExecutionCondition}.
@@ -79,10 +89,54 @@ class ScriptExecutionConditionTests extends AbstractJupiterTestEngineTests {
 	@Test
 	void throwingWorkerExceptionMessage() {
 		ReflectiveOperationException cause = new ReflectiveOperationException("Mock for ReflectiveOperationException");
-		Exception e = assertThrows(ScriptEvaluationException.class,
-			() -> new ScriptExecutionCondition.ThrowingWorker(cause).work(null, null));
+		ScriptExecutionCondition.Worker worker = new ScriptExecutionCondition.ThrowingWorker(cause);
+		Exception e = assertThrows(ScriptEvaluationException.class, () -> worker.work(null, null));
 		assertThat(e.getMessage()).contains("ScriptExecutionCondition", "illegal state", "NoClassDefFoundError",
-			"--add-modules");
+			"--add-modules", "java.scripting");
+	}
+
+	@Test
+	void enabledDueToAnnotatedElementNotPresent() {
+		ScriptExecutionCondition condition = new ScriptExecutionCondition();
+		ExtensionContext context = Mockito.mock(ExtensionContext.class);
+		ConditionEvaluationResult result = condition.evaluateExecutionCondition(context);
+		assertFalse(result.isDisabled());
+		assertTrue(result.getReason().isPresent());
+		result.getReason().ifPresent(reason -> assertEquals("AnnotatedElement not present", reason));
+	}
+
+	@Test
+	void enabledDueToAnnotationNotPresent() {
+		ScriptExecutionCondition condition = new ScriptExecutionCondition();
+		ExtensionContext context = Mockito.mock(ExtensionContext.class);
+		Optional<AnnotatedElement> optionalElement = Optional.of(ScriptExecutionConditionTests.class);
+		Mockito.when(context.getElement()).thenReturn(optionalElement);
+		ConditionEvaluationResult result = condition.evaluateExecutionCondition(context);
+		assertFalse(result.isDisabled());
+		assertTrue(result.getReason().isPresent());
+		result.getReason().ifPresent(reason -> assertEquals("Annotation not present", reason));
+	}
+
+	@Test
+	@Disabled("Mock or not to mock")
+	void throwingWorkerIsCreatedWhenScriptEngineIsNotAvailable() throws ReflectiveOperationException {
+		ScriptExecutionCondition condition = Mockito.spy(new ScriptExecutionCondition());
+		Error cause = new Error("Mock for ScriptEngine is not available");
+		Mockito.when(condition.assumeScriptEngineIsLoadableByClassForName()).thenReturn(Optional.of(cause));
+		assertTrue(condition.assumeScriptEngineIsLoadableByClassForName().isPresent());
+		assertSame(cause, condition.assumeScriptEngineIsLoadableByClassForName().orElseThrow(Error::new));
+
+		ExtensionContext context = Mockito.mock(ExtensionContext.class);
+		AnnotatedElement element = SimpleTestCases.class.getDeclaredMethod("testIsEnabled");
+		Mockito.when(context.getElement()).thenReturn(Optional.of(element));
+		Mockito.when(context.getRoot()).thenReturn(context);
+		// TODO How to mock a method with parameter and return a "working" store?
+		// Mockito.when(context.getStore(ExtensionContext.Namespace.create(ScriptExecutionCondition.class))).thenReturn(context);
+
+		Exception e = assertThrows(ScriptEvaluationException.class,
+			() -> condition.evaluateExecutionCondition(context));
+		assertThat(e.getMessage()).contains("ScriptExecutionCondition", "illegal state", "NoClassDefFoundError",
+			"--add-modules", "java.scripting");
 	}
 
 	static class SimpleTestCases {

@@ -47,7 +47,7 @@ class ScriptExecutionCondition implements ExecutionCondition {
 
 	private static final Namespace NAMESPACE = Namespace.create(ScriptExecutionCondition.class);
 
-	private static final String NAME = "org.junit.jupiter.engine.extension.ScriptExecutionWorker";
+	private static final String WORKER = "org.junit.jupiter.engine.extension.ScriptExecutionWorker";
 
 	@Override
 	public ConditionEvaluationResult evaluateExecutionCondition(ExtensionContext context) {
@@ -99,19 +99,38 @@ class ScriptExecutionCondition implements ExecutionCondition {
 	}
 
 	private Worker getScriptExecutionWorker(ExtensionContext context) {
-		ExtensionContext.Store rootStore = context.getRoot().getStore(NAMESPACE);
-		return rootStore.getOrComputeIfAbsent(NAME, this::createWorker, Worker.class);
+		ExtensionContext root = context.getRoot();
+		ExtensionContext.Store rootStore = root.getStore(NAMESPACE);
+		return rootStore.getOrComputeIfAbsent(WORKER, this::createWorker, Worker.class);
 	}
 
 	// Create worker via reflection to hide the `javax.script` dependency.
 	private Worker createWorker(String name) {
+		logger.debug(() -> String.format("Creating instance of `%s`...", name));
+		Optional<Throwable> optionalThrowable = assumeScriptEngineIsLoadableByClassForName();
+		if (optionalThrowable.isPresent()) {
+			return new ThrowingWorker(optionalThrowable.get());
+		}
 		try {
-			logger.debug(() -> "Creating instance of " + name);
 			return (Worker) Class.forName(name).getDeclaredConstructor().newInstance();
 		}
-		catch (ReflectiveOperationException e) {
-			logger.error(e, () -> String.format("Creating `%s` failed", name));
-			return new ThrowingWorker(e);
+		catch (ReflectiveOperationException cause) {
+			logger.error(cause, () -> String.format("Creating instance of `%s` failed", name));
+			return new ThrowingWorker(cause);
+		}
+	}
+
+	// This method may fail on JREs that don't provide the "javax.script" package at all
+	// or it fails on JREs launched with an active module system using insufficient module
+	// graphs, i.e. the application does not read "java.scripting" module.
+	Optional<Throwable> assumeScriptEngineIsLoadableByClassForName() {
+		try {
+			Class.forName("javax.script.ScriptEngine");
+			return Optional.empty();
+		}
+		catch (Throwable cause) {
+			logger.error(cause, () -> "Loading `javax.script.ScriptEngine` failed");
+			return Optional.of(cause);
 		}
 	}
 
