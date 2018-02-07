@@ -28,6 +28,7 @@ import javax.script.SimpleBindings;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
+import org.junit.jupiter.api.condition.DisabledIf;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.extension.ConditionEvaluationResult;
 import org.junit.jupiter.api.extension.ScriptEvaluationException;
@@ -36,15 +37,15 @@ import org.junit.jupiter.engine.script.Script;
 import org.junit.jupiter.engine.script.ScriptExecutionManager;
 
 /**
- * Unit tests for {@link ScriptExecutionWorker}.
+ * Unit tests for {@link ScriptExecutionEvaluator}.
  *
  * @since 5.1
  */
-class ScriptExecutionWorkerTests extends AbstractJupiterTestEngineTests {
+class ScriptExecutionEvaluatorTests extends AbstractJupiterTestEngineTests {
 
 	private final Bindings bindings = createDefaultContextBindings();
 	private final ScriptExecutionManager manager = new ScriptExecutionManager();
-	private final ScriptExecutionWorker worker = new ScriptExecutionWorker();
+	private final ScriptExecutionEvaluator evaluator = new ScriptExecutionEvaluator();
 
 	@Test
 	void nullAsScriptReturnsNullAsResult() {
@@ -54,7 +55,7 @@ class ScriptExecutionWorkerTests extends AbstractJupiterTestEngineTests {
 	@Test
 	void computeConditionEvaluationResultWithDefaultReasonMessage() {
 		Script script = script(EnabledIf.class, "?");
-		String actual = worker.computeConditionEvaluationResult(script, "!").getReason().orElseThrow(Error::new);
+		String actual = evaluator.computeConditionEvaluationResult(script, "!").getReason().orElseThrow(Error::new);
 		assertEquals("Script `?` evaluated to: !", actual);
 	}
 
@@ -68,7 +69,7 @@ class ScriptExecutionWorkerTests extends AbstractJupiterTestEngineTests {
 	private void computeConditionEvaluationResultFailsForUnsupportedAnnotationType(Type type) {
 		Script script = new Script(type, "annotation", "engine", "source", "reason");
 		Exception e = assertThrows(ScriptEvaluationException.class,
-			() -> worker.computeConditionEvaluationResult(script, "!"));
+			() -> evaluator.computeConditionEvaluationResult(script, "!"));
 		String expected = "Unsupported annotation type: " + type;
 		String actual = e.getMessage();
 		assertEquals(expected, actual);
@@ -84,22 +85,22 @@ class ScriptExecutionWorkerTests extends AbstractJupiterTestEngineTests {
 
 	@Test
 	void getJUnitConfigurationParameterWithJavaScript() {
-		Script script = script(EnabledIf.class, "junitConfigurationParameter.get('XXX')");
+		Script script = script(DisabledIf.class, "junitConfigurationParameter.get('XXX')");
 		Exception exception = assertThrows(ScriptEvaluationException.class, () -> evaluate(script));
 		assertThat(exception.getMessage()).contains("Script returned `null`");
 	}
 
 	@Test
 	void getJUnitConfigurationParameterWithJavaScriptAndCheckForNull() {
-		Script script = script(EnabledIf.class, "junitConfigurationParameter.get('XXX') != null");
+		Script script = script(DisabledIf.class, "junitConfigurationParameter.get('XXX') == null");
 		ConditionEvaluationResult result = evaluate(script);
 		assertTrue(result.isDisabled());
 		String actual = result.getReason().orElseThrow(() -> new AssertionError("causeless"));
-		assertEquals("Script `junitConfigurationParameter.get('XXX') != null` evaluated to: false", actual);
+		assertEquals("Script `junitConfigurationParameter.get('XXX') == null` evaluated to: true", actual);
 	}
 
 	private ConditionEvaluationResult evaluate(Script script) {
-		return worker.evaluate(manager, script, bindings);
+		return evaluator.evaluate(manager, script, bindings);
 	}
 
 	private Script script(Type type, String... lines) {

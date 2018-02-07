@@ -23,11 +23,8 @@ import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.extension.ConditionEvaluationResult;
 import org.junit.jupiter.api.extension.ExecutionCondition;
 import org.junit.jupiter.api.extension.ExtensionContext;
-import org.junit.jupiter.api.extension.ExtensionContext.Namespace;
 import org.junit.jupiter.api.extension.ScriptEvaluationException;
 import org.junit.jupiter.engine.script.Script;
-import org.junit.platform.commons.logging.Logger;
-import org.junit.platform.commons.logging.LoggerFactory;
 
 /**
  * {@link ExecutionCondition} that supports the {@link DisabledIf} and {@link EnabledIf} annotation.
@@ -39,15 +36,23 @@ import org.junit.platform.commons.logging.LoggerFactory;
  */
 class ScriptExecutionCondition implements ExecutionCondition {
 
-	private static final Logger logger = LoggerFactory.getLogger(ScriptExecutionCondition.class);
-
 	private static final ConditionEvaluationResult ENABLED_NO_ELEMENT = enabled("AnnotatedElement not present");
 
 	private static final ConditionEvaluationResult ENABLED_NO_ANNOTATION = enabled("Annotation not present");
 
-	private static final Namespace NAMESPACE = Namespace.create(ScriptExecutionCondition.class);
+	private static final String EVALUATOR_CLASS_NAME = "org.junit.jupiter.engine.extension.ScriptExecutionEvaluator";
 
-	private static final String WORKER = "org.junit.jupiter.engine.extension.ScriptExecutionWorker";
+	private final Evaluator evaluator;
+
+	// Used by the ExtensionRegistry.
+	ScriptExecutionCondition() {
+		this(EVALUATOR_CLASS_NAME);
+	}
+
+	// Used by tests.
+	ScriptExecutionCondition(String evaluatorImplementationName) {
+		this.evaluator = Evaluator.forName(evaluatorImplementationName);
+	}
 
 	@Override
 	public ConditionEvaluationResult evaluateExecutionCondition(ExtensionContext context) {
@@ -68,8 +73,8 @@ class ScriptExecutionCondition implements ExecutionCondition {
 			return ENABLED_NO_ANNOTATION;
 		}
 
-		Worker worker = getScriptExecutionWorker(context);
-		return worker.work(context, scripts);
+		// Let the evaluator do its work.
+		return evaluator.evaluate(context, scripts);
 	}
 
 	private Optional<Script> createDisabledIfScript(AnnotatedElement annotatedElement) {
@@ -98,57 +103,53 @@ class ScriptExecutionCondition implements ExecutionCondition {
 		return String.join(System.lineSeparator(), lines);
 	}
 
-	private Worker getScriptExecutionWorker(ExtensionContext context) {
-		ExtensionContext root = context.getRoot();
-		ExtensionContext.Store rootStore = root.getStore(NAMESPACE);
-		return rootStore.getOrComputeIfAbsent(WORKER, this::createWorker, Worker.class);
-	}
-
-	// Create worker via reflection to hide the `javax.script` dependency.
-	private Worker createWorker(String name) {
-		logger.debug(() -> String.format("Creating instance of `%s`...", name));
-		Optional<Throwable> optionalThrowable = assumeScriptEngineIsLoadableByClassForName();
-		if (optionalThrowable.isPresent()) {
-			return new ThrowingWorker(optionalThrowable.get());
-		}
-		try {
-			return (Worker) Class.forName(name).getDeclaredConstructor().newInstance();
-		}
-		catch (ReflectiveOperationException cause) {
-			logger.error(cause, () -> String.format("Creating instance of `%s` failed", name));
-			return new ThrowingWorker(cause);
-		}
-	}
-
-	// This method may fail on JREs that don't provide the "javax.script" package at all
-	// or it fails on JREs launched with an active module system using insufficient module
-	// graphs, i.e. the application does not read "java.scripting" module.
-	Optional<Throwable> assumeScriptEngineIsLoadableByClassForName() {
-		try {
-			Class.forName("javax.script.ScriptEngine");
-			return Optional.empty();
-		}
-		catch (Throwable cause) {
-			logger.error(cause, () -> "Loading `javax.script.ScriptEngine` failed");
-			return Optional.of(cause);
-		}
-	}
-
 	/**
 	 * Evaluates scripts and returns a conditional evaluation result.
 	 */
-	interface Worker {
-		ConditionEvaluationResult work(ExtensionContext context, List<Script> scripts);
+	interface Evaluator {
+
+		ConditionEvaluationResult evaluate(ExtensionContext context, List<Script> scripts);
+
+		/**
+		 * Create evaluator via reflection to hide the `javax.script` dependency.
+		 */
+		static Evaluator forName(String name) {
+			Optional<Throwable> optionalThrowable = assumeScriptEngineIsLoadableByClassForName();
+			if (optionalThrowable.isPresent()) {
+				return new ThrowingEvaluator(optionalThrowable.get());
+			}
+			try {
+				return (Evaluator) Class.forName(name).getDeclaredConstructor().newInstance();
+			}
+			catch (ReflectiveOperationException cause) {
+				return new ThrowingEvaluator(cause);
+			}
+		}
+
+		/**
+		 * This method may fail on JREs that don't provide the "javax.script" package at all
+		 * or it fails on JREs launched with an active module system using insufficient module
+		 * graphs, i.e. the application does not read "java.scripting" module.
+		 */
+		static Optional<Throwable> assumeScriptEngineIsLoadableByClassForName() {
+			try {
+				Class.forName("javax.script.ScriptEngine");
+				return Optional.empty();
+			}
+			catch (Throwable cause) {
+				return Optional.of(cause);
+			}
+		}
 	}
 
 	/**
-	 * Worker implementation that always throws an {@link ScriptEvaluationException}.
+	 * Evaluator implementation that always throws an {@link ScriptEvaluationException}.
 	 */
-	static class ThrowingWorker implements Worker {
+	static class ThrowingEvaluator implements Evaluator {
 
 		final ScriptEvaluationException exception;
 
-		ThrowingWorker(Throwable cause) {
+		ThrowingEvaluator(Throwable cause) {
 			String message = "ScriptExecutionCondition extension is in an illegal state, " //
 					+ "script evaluation is disabled. " //
 					+ "If the originating cause is a `NoClassDefFoundError: javax/script/...` and " //
@@ -160,8 +161,9 @@ class ScriptExecutionCondition implements ExecutionCondition {
 		}
 
 		@Override
-		public ConditionEvaluationResult work(ExtensionContext context, List<Script> scripts) {
+		public ConditionEvaluationResult evaluate(ExtensionContext context, List<Script> scripts) {
 			throw exception;
 		}
 	}
+
 }

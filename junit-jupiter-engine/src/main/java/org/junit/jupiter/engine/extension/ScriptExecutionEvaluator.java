@@ -29,16 +29,18 @@ import org.junit.jupiter.engine.script.ScriptAccessor;
 import org.junit.jupiter.engine.script.ScriptExecutionManager;
 
 /**
- * Encapsulates javax.script-related work.
+ * Encapsulates javax.script-related evaluation work.
+ *
+ * <p>This class is instantiated via reflection.
  */
-class ScriptExecutionWorker implements ScriptExecutionCondition.Worker {
+class ScriptExecutionEvaluator implements ScriptExecutionCondition.Evaluator {
 
 	private static final ConditionEvaluationResult ENABLED_ALL = enabled("All results are enabled");
 
 	private final ScriptExecutionManager scriptExecutionManager = new ScriptExecutionManager();
 
 	@Override
-	public ConditionEvaluationResult work(ExtensionContext context, List<Script> scripts) {
+	public ConditionEvaluationResult evaluate(ExtensionContext context, List<Script> scripts) {
 		Bindings bindings = createBindings(context);
 		for (Script script : scripts) {
 			ConditionEvaluationResult result = evaluate(scriptExecutionManager, script, bindings);
